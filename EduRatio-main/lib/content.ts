@@ -1,0 +1,313 @@
+import type { QuestionDefinition, SubtopicDefinition } from "@/lib/types";
+
+export const SUBTOPICS: SubtopicDefinition[] = [
+  {
+    id: "operations",
+    title: "Arithmetic Operations",
+    concepts: [
+      {
+        id: "operations-c1",
+        title: "Adding and Subtracting Rational Numbers",
+        explanation: "Use a common denominator, then combine numerators carefully with sign rules.",
+        examples: ["1/3 + (-2/3) = -1/3", "-5/8 - 1/8 = -6/8 = -3/4"],
+        misconceptions: ["Ignoring negative signs", "Adding denominators directly"],
+      },
+      {
+        id: "operations-c2",
+        title: "Multiplying and Dividing Rational Numbers",
+        explanation: "Multiply numerators and denominators directly, and use reciprocal for division.",
+        examples: ["(-2/3) x (9/10) = -18/30 = -3/5", "4/7 / (-2/3) = 4/7 x -3/2 = -6/7"],
+        misconceptions: ["Not flipping second fraction in division"],
+      },
+    ],
+  },
+  {
+    id: "number-line",
+    title: "Number line",
+    concepts: [
+      {
+        id: "nl-c1",
+        title: "Plotting and comparing on the line",
+        explanation:
+          "Rationals sit at signed distances from 0; compare by rewriting to common denominators or by left/right position.",
+        examples: ["−2/3 > −5/6 once both are over 6", "Distance |a−b| measures segment length"],
+        misconceptions: ["Thinking farther left means greater on positives only — negatives reverse intuition"],
+      },
+      {
+        id: "nl-c2",
+        title: "Distance as absolute difference",
+        explanation: "Subtract endpoints in either order, then take absolute value for a nonnegative distance.",
+        examples: ["|3/5−(−1/5)|=4/5"],
+        misconceptions: ["Forgetting absolute value gives negative distances"],
+      },
+    ],
+  },
+  {
+    id: "properties",
+    title: "Algebraic Properties",
+    concepts: [
+      {
+        id: "pr-c1",
+        title: "Commutativity and associativity",
+        explanation: "Addition and multiplication of rationals can swap order (commute) and regroup (associate) without changing results.",
+        examples: ["a+b=b+a", "(a+b)+c=a+(b+c)"],
+        misconceptions: ["Applying commutativity to subtraction directly without rewriting as +(-b)"],
+      },
+      {
+        id: "pr-c2",
+        title: "Distributivity",
+        explanation: "Multiply a sum by distributing across each term: a×(b+c)=a×b+a×c.",
+        examples: ["1/2×(2+4)=1+2"],
+        misconceptions: ["Distributing division like multiplication"],
+      },
+    ],
+  },
+  {
+    id: "identities",
+    title: "Identities",
+    concepts: [
+      {
+        id: "id-c1",
+        title: "Additive and multiplicative identities",
+        explanation: "Zero leaves sums unchanged; one leaves products unchanged.",
+        examples: ["x+0=x", "x×1=x"],
+        misconceptions: ["Treating −1 as the multiplicative identity"],
+      },
+    ],
+  },
+  {
+    id: "inverses",
+    title: "Inverses",
+    concepts: [
+      {
+        id: "inv-c1",
+        title: "Additive and multiplicative inverses",
+        explanation: "−a cancels a in addition; reciprocal 1/a (a≠0) multiplies with a to give 1.",
+        examples: ["a+(−a)=0", "a×(1/a)=1"],
+        misconceptions: ["Thinking 0 has a reciprocal"],
+      },
+    ],
+  },
+  {
+    id: "numbers-between",
+    title: "Numbers between two rational numbers",
+    concepts: [
+      {
+        id: "nb-c1",
+        title: "Betweenness and density",
+        explanation: "The average (p+q)/2 lies strictly between distinct p and q; repeat to see infinitely many rationals in any gap.",
+        examples: ["Between 1/3 and 2/3, 1/2 works"],
+        misconceptions: ["Believing there is a 'next' rational after a given one"],
+      },
+    ],
+  },
+];
+
+export const QUESTIONS: QuestionDefinition[] = [
+  {
+    id: "op-e-1",
+    subtopicId: "operations",
+    prompt: "Compute: 1/4 + 1/2",
+    difficulty: "easy",
+    answer: "3/4",
+    skills: ["lcm_handling", "simplification"],
+    error_tags: ["ERR_LCM"],
+    hints: [
+      "Find a common denominator first.",
+      "Convert 1/2 to fourths before adding.",
+      "1/2 = 2/4, so 1/4 + 2/4 = 3/4.",
+    ],
+  },
+  {
+    id: "op-m-1",
+    subtopicId: "operations",
+    prompt: "Compute: -3/5 + 1/10",
+    difficulty: "medium",
+    answer: "-1/2",
+    skills: ["sign_rules", "lcm_handling"],
+    error_tags: ["ERR_SIGN", "ERR_LCM"],
+    hints: [
+      "Make denominators the same first.",
+      "Use denominator 10 and combine numerators with sign.",
+      "-3/5 = -6/10, so -6/10 + 1/10 = -5/10 = -1/2.",
+    ],
+  },
+  {
+    id: "op-h-1",
+    subtopicId: "operations",
+    prompt: "Compute: (-7/9) / (14/27)",
+    difficulty: "hard",
+    answer: "-3/2",
+    skills: ["inverse", "simplification", "sign_rules"],
+    error_tags: ["ERR_INVERSE", "ERR_SIMPLIFY"],
+    hints: [
+      "Division means multiply by reciprocal.",
+      "Rewrite as (-7/9) x (27/14) and simplify.",
+      "Cancel 7 with 14 and 27 with 9, giving -3/2.",
+    ],
+  },
+  {
+    id: "nl-e-1",
+    subtopicId: "number-line",
+    prompt: "Which is greater: −7/8 or −1/8?",
+    difficulty: "easy",
+    answer: "-1/8",
+    skills: ["order"],
+    error_tags: ["ERR_ORDER"],
+    hints: [
+      "Draw both on a line: more negative is left/smaller.",
+      "−1/8 is to the right of −7/8.",
+      "So −1/8 is greater.",
+    ],
+  },
+  {
+    id: "nl-m-1",
+    subtopicId: "number-line",
+    prompt: "Distance between 2/3 and −1/3 on the number line?",
+    difficulty: "medium",
+    answer: "1",
+    skills: ["absolute_value"],
+    error_tags: ["ERR_ABS"],
+    hints: ["Use |a−b|.", "2/3 − (−1/3)=1.", "Absolute value is 1."],
+  },
+  {
+    id: "nl-h-1",
+    subtopicId: "number-line",
+    prompt: "Rewrite 5/6 with denominator 12.",
+    difficulty: "hard",
+    answer: "10/12",
+    skills: ["equivalent_fractions"],
+    error_tags: ["ERR_EQ"],
+    hints: ["Multiply top and bottom by 2.", "5×2 over 6×2.", ""],
+  },
+  {
+    id: "pr-e-1",
+    subtopicId: "properties",
+    prompt: "Use commutativity: (−1/4) + (3/4) equals?",
+    difficulty: "easy",
+    answer: "1/2",
+    skills: ["commute"],
+    error_tags: [],
+    hints: ["Same as 3/4 + (−1/4).", "Combine numerators over 4.", ""],
+  },
+  {
+    id: "pr-m-1",
+    subtopicId: "properties",
+    prompt: "Expand: (1/3)×(6/7 + 15/7)",
+    difficulty: "medium",
+    answer: "1",
+    skills: ["distribute"],
+    error_tags: [],
+    hints: ["Add inside first: 21/7=3.", "Then 1/3×3.", ""],
+  },
+  {
+    id: "pr-h-1",
+    subtopicId: "properties",
+    prompt: "Which property lets you write (a+b)+c as a+(b+c)?",
+    difficulty: "hard",
+    answer: "associativity",
+    skills: ["vocab"],
+    error_tags: [],
+    hints: ["Regrouping parentheses is…", "associativity of addition.", ""],
+  },
+  {
+    id: "id-e-1",
+    subtopicId: "identities",
+    prompt: "Simplify: 0 + (−4/13)",
+    difficulty: "easy",
+    answer: "-4/13",
+    skills: ["identity"],
+    error_tags: [],
+    hints: ["0 is additive identity.", "", ""],
+  },
+  {
+    id: "id-m-1",
+    subtopicId: "identities",
+    prompt: "Simplify: (14/−3) × 1",
+    difficulty: "medium",
+    answer: "-14/3",
+    skills: ["identity"],
+    error_tags: [],
+    hints: ["Multiplying by 1 changes nothing.", "", ""],
+  },
+  {
+    id: "id-h-1",
+    subtopicId: "identities",
+    prompt: "Simplify: (2/5)×0",
+    difficulty: "hard",
+    answer: "0",
+    skills: ["zero_factor"],
+    error_tags: [],
+    hints: ["Any rational times 0…", "", ""],
+  },
+  {
+    id: "in-e-1",
+    subtopicId: "inverses",
+    prompt: "Additive inverse of 11/15",
+    difficulty: "easy",
+    answer: "-11/15",
+    skills: ["additive_inverse"],
+    error_tags: [],
+    hints: ["Flip the sign.", "", ""],
+  },
+  {
+    id: "in-m-1",
+    subtopicId: "inverses",
+    prompt: "Reciprocal of 5/8",
+    difficulty: "medium",
+    answer: "8/5",
+    skills: ["reciprocal"],
+    error_tags: [],
+    hints: ["Flip numerator and denominator.", "", ""],
+  },
+  {
+    id: "in-h-1",
+    subtopicId: "inverses",
+    prompt: "Compute: 1/6 − 5/6",
+    difficulty: "hard",
+    answer: "-2/3",
+    skills: ["subtract"],
+    error_tags: [],
+    hints: ["Same denominator; subtract numerators.", "Simplify −4/6.", ""],
+  },
+  {
+    id: "nb-e-1",
+    subtopicId: "numbers-between",
+    prompt: "Name one rational strictly between 0 and 1/4.",
+    difficulty: "easy",
+    answer: "1/8",
+    skills: ["between"],
+    error_tags: [],
+    hints: ["Try the average of endpoints.", "(0+1/4)/2.", ""],
+  },
+  {
+    id: "nb-m-1",
+    subtopicId: "numbers-between",
+    prompt: "Average of −1/2 and 1/2",
+    difficulty: "medium",
+    answer: "0",
+    skills: ["average"],
+    error_tags: [],
+    hints: ["Sum is 0; half of 0 is 0.", "", ""],
+  },
+  {
+    id: "nb-h-1",
+    subtopicId: "numbers-between",
+    prompt: "Which lies strictly between 1/3 and 2/3?",
+    difficulty: "hard",
+    answer: "1/2",
+    skills: ["between"],
+    error_tags: [],
+    hints: ["Compare to 2/6 and 4/6.", "3/6 is in between.", ""],
+  },
+];
+
+export const TOTAL_QUESTIONS_TARGET = 20;
+
+export function getQuestionsForSubtopic(subtopicId: string): QuestionDefinition[] {
+  return QUESTIONS.filter((question) => question.subtopicId === subtopicId);
+}
+
+export function getQuestionById(questionId: string): QuestionDefinition | undefined {
+  return QUESTIONS.find((question) => question.id === questionId);
+}

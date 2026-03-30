@@ -1,0 +1,358 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #1e293b;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+}
+
+@keyframes floatSlow {
+  0%,
+  100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+
+@keyframes blinkFast {
+  0%,
+  46%,
+  100% {
+    transform: scaleY(1);
+  }
+  48%,
+  50% {
+    transform: scaleY(0.12);
+  }
+}
+
+@keyframes bobGentle {
+  0%,
+  100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+.animate-float-slow {
+  animation: floatSlow 3.2s ease-in-out infinite;
+}
+
+.animate-blink-fast {
+  animation: blinkFast 5s linear infinite;
+  transform-origin: center;
+}
+
+.animate-bob-gentle {
+  animation: bobGentle 2.8s ease-in-out infinite;
+}
+
+@keyframes pulseRing {
+  0%,
+  100% {
+    box-shadow: 0 8px 32px rgba(245, 166, 35, 0.45);
+  }
+  50% {
+    box-shadow: 0 8px 44px rgba(245, 166, 35, 0.75);
+  }
+}
+
+.animate-pulse-ring {
+  animation: pulseRing 2s ease-in-out infinite;
+}
+
+@keyframes floatBob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-14px);
+  }
+}
+
+.animate-float-bob {
+  animation: floatBob 4s ease-in-out infinite;
+}
+
+@keyframes fadeDown {
+  from {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-down {
+  animation: fadeDown 0.7s ease both;
+}
+
+/*
+ * Pen — cartoon blink (round → flat slit → round), center origin.
+ * Timing similar to quick “googly / live wallpaper” eye clips (e.g. Pinterest “Occhi” style):
+ * fast shut, short hold, fast open — use linear so keyframe times stay exact.
+ */
+@keyframes penEyeBlink {
+  0%,
+  84%,
+  100% {
+    transform: scaleY(1);
+  }
+  /* quick close */
+  85.8% {
+    transform: scaleY(1);
+  }
+  86.45% {
+    transform: scaleY(0.06);
+  }
+  /* brief closed beat */
+  86.7% {
+    transform: scaleY(0.06);
+  }
+  /* snap open */
+  88.1% {
+    transform: scaleY(1);
+  }
+}
+
+.pen-avatar-eye {
+  transform-box: fill-box;
+  animation: penEyeBlink 5.5s linear infinite;
+}
+
+.pen-avatar-eye-l {
+  transform-origin: 43px 48px;
+}
+
+.pen-avatar-eye-r {
+  transform-origin: 67px 48px;
+  animation-delay: 0.04s;
+}
+
+/* Operations chapter — section entrance */
+@keyframes opReveal {
+  from {
+    opacity: 0;
+    transform: translateY(22px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.op-reveal {
+  animation: opReveal 0.75s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Dashboard hero — glass panels + math symbols (low-opacity glass, subtle motion) */
+.hero-math-glass {
+  /* Glass stack: blur + faint frosted layer; per-panel tint lives in Tailwind */
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    0 2px 16px rgba(15, 40, 55, 0.06);
+}
+
+.hero-math-symbol-inner {
+  opacity: 0.88;
+}
+
+.hero-math-caption {
+  color: rgba(248, 252, 255, 0.78);
+  text-shadow: 0 1px 10px rgba(15, 40, 55, 0.35);
+}
+
+@keyframes heroMathDrift {
+  0%,
+  100% {
+    transform: translate(0, 0);
+  }
+  50% {
+    transform: translate(5px, -7px);
+  }
+}
+
+@keyframes heroMathDriftSlow {
+  0%,
+  100% {
+    transform: translate(0, 0);
+  }
+  50% {
+    transform: translate(-6px, 6px);
+  }
+}
+
+@keyframes heroMathDriftReverse {
+  0%,
+  100% {
+    transform: translate(0, 0);
+  }
+  50% {
+    transform: translate(4px, 5px);
+  }
+}
+
+/* Slightly deeper float — reads as light parallax vs. center content */
+@keyframes heroMathParallax {
+  0%,
+  100% {
+    transform: translate(0, 0);
+  }
+  33% {
+    transform: translate(4px, -9px);
+  }
+  66% {
+    transform: translate(-4px, 5px);
+  }
+}
+
+.animate-hero-math-drift {
+  animation: heroMathDrift 21s ease-in-out infinite;
+}
+
+.animate-hero-math-drift-slow {
+  animation: heroMathDriftSlow 27s ease-in-out infinite;
+}
+
+.animate-hero-math-drift-reverse {
+  animation: heroMathDriftReverse 23s ease-in-out infinite;
+}
+
+.animate-hero-math-parallax {
+  animation: heroMathParallax 29s ease-in-out infinite;
+}
+
+/* Learning path — rocket landing bounce (inner wrapper; parent handles rotate) */
+@keyframes rocketLandBounce {
+  0% {
+    transform: translateY(0) scale(1);
+  }
+  35% {
+    transform: translateY(-10px) scale(1.07);
+  }
+  60% {
+    transform: translateY(5px) scale(0.96);
+  }
+  80% {
+    transform: translateY(-3px) scale(1.02);
+  }
+  100% {
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animate-rocket-land {
+  animation: rocketLandBounce 0.55s cubic-bezier(0.34, 1.25, 0.64, 1) both;
+}
+
+@keyframes rocketEnter {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.88);
+  }
+  60% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.02);
+  }
+  100% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+.animate-rocket-enter {
+  animation: rocketEnter 220ms ease-out both;
+}
+
+@keyframes rocketFlame {
+  0%,
+  100% {
+    opacity: 0.85;
+    transform: scaleY(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scaleY(1.15);
+  }
+}
+
+.animate-rocket-flame {
+  animation: rocketFlame 0.22s ease-in-out infinite;
+}
+
+@keyframes rocketSpark {
+  0% {
+    opacity: 0.0;
+    transform: translate(0, 0) scale(0.85);
+  }
+  20% {
+    opacity: 0.95;
+    transform: translate(0, -6px) scale(1);
+  }
+  60% {
+    opacity: 0.55;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(0, -14px) scale(0.7);
+  }
+}
+
+.animate-rocket-spark {
+  animation: rocketSpark 0.55s ease-out infinite;
+}
+
+/* Blackboard chalk typography (for pre-quiz summary) */
+.chalk-title,
+.chalk-line {
+  font-family: "Comic Sans MS", "Marker Felt", "Bradley Hand", cursive, system-ui, -apple-system, Segoe UI, Roboto,
+    Arial, sans-serif;
+  color: #eaf7f0; /* slightly off-white */
+  text-shadow:
+    0 1px 0 rgba(0, 0, 0, 0.25),
+    0 0 10px rgba(126, 207, 221, 0.12),
+    0 0 2px rgba(255, 255, 255, 0.12);
+  filter: blur(0.1px);
+}
+
+.chalk-title {
+  letter-spacing: 0.01em;
+  opacity: 0.98;
+}
+
+.chalk-list {
+  margin: 0;
+  padding: 0;
+}
+
+.chalk-line {
+  position: relative;
+  opacity: 0.95;
+}
+
+.chalk-dash {
+  margin-right: 0.35rem;
+  color: #bfffe9;
+  text-shadow:
+    0 1px 0 rgba(0, 0, 0, 0.25),
+    0 0 8px rgba(126, 207, 221, 0.18);
+}
