@@ -8,7 +8,9 @@ import type {
   SessionsRow,
 } from "@/db/schema.types";
 
-export async function createSession(row: Pick<SessionsRow, "session_id" | "student_id">) {
+export async function createSession(
+  row: Pick<SessionsRow, "session_id" | "student_id" | "total_questions" | "total_hints_embedded">,
+) {
   const payload = {
     ...row,
     chapter_id: "grade8_rational_numbers" as const,
@@ -30,6 +32,8 @@ export async function updateSessionMetrics(
       | "total_hints_embedded"
       | "time_spent_seconds"
       | "topic_completion_ratio"
+      | "total_questions"
+      | "total_hints_embedded"
       | "merge_dispatched"
       | "merge_dispatch_attempts"
       | "completed_at"

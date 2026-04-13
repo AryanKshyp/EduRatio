@@ -11,6 +11,7 @@ import {
   quizCompleteBubble,
 } from "@/lib/penWelcome";
 import { QUIZ_COMPLETE_EVENT, type QuizCompleteDetail } from "@/lib/chapterTypes";
+import { MERGE_SESSION_STORAGE_KEYS } from "@/lib/mergeSessionKeys";
 import type { PenIntent } from "@/lib/penEngine";
 
 function normalizePathname(raw: string | null): string {
@@ -135,7 +136,8 @@ export function PenAssistant() {
       const structuredContent =
         intent === "hint" ? hintText : intent === "remediation" ? remediationText : explanationText;
 
-      const sessionId = typeof window !== "undefined" ? localStorage.getItem("active_session_id") : null;
+      const sessionId =
+        typeof window !== "undefined" ? sessionStorage.getItem(MERGE_SESSION_STORAGE_KEYS.sessionId) : null;
       const response = await fetch("/api/pen", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

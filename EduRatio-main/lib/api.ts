@@ -19,3 +19,12 @@ export function isNonEmptyString(value: unknown): value is string {
 export function isNonNegativeNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }
+
+export function getBearerToken(request: Request): string | null {
+  const header = request.headers.get("authorization");
+  if (!header) return null;
+  const [scheme, token] = header.split(" ");
+  if (!scheme || !token || scheme.toLowerCase() !== "bearer") return null;
+  const trimmed = token.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}

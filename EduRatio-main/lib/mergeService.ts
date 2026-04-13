@@ -1,14 +1,14 @@
 import type { SessionsRow } from "@/db/schema.types";
-import type { MergePayload } from "@/lib/types";
+import type { MergePayload, MergeSessionStatus } from "@/lib/types";
 
-function toNumber(value: unknown, fallback = 0): number {
+function toNullableNumber(value: unknown): number | null {
   const converted = Number(value);
-  return Number.isFinite(converted) ? converted : fallback;
+  return Number.isFinite(converted) ? converted : null;
 }
 
 export function buildMergePayload(
   session: SessionsRow,
-  status: "completed" | "exited",
+  status: MergeSessionStatus,
 ): MergePayload {
   return {
     student_id: session.student_id,
@@ -16,28 +16,86 @@ export function buildMergePayload(
     chapter_id: "grade8_rational_numbers",
     timestamp: new Date().toISOString(),
     session_status: status,
-    correct_answers: toNumber(session.correct_answers),
-    wrong_answers: toNumber(session.wrong_answers),
-    questions_attempted: toNumber(session.questions_attempted),
-    total_questions: toNumber(session.total_questions, 20),
-    retry_count: toNumber(session.retry_count),
-    hints_used: toNumber(session.hints_used),
-    total_hints_embedded: toNumber(session.total_hints_embedded),
-    time_spent_seconds: toNumber(session.time_spent_seconds),
-    topic_completion_ratio: toNumber(session.topic_completion_ratio),
+    correct_answers: toNullableNumber(session.correct_answers),
+    wrong_answers: toNullableNumber(session.wrong_answers),
+    questions_attempted: toNullableNumber(session.questions_attempted),
+    total_questions: toNullableNumber(session.total_questions),
+    retry_count: toNullableNumber(session.retry_count),
+    hints_used: toNullableNumber(session.hints_used),
+    total_hints_embedded: toNullableNumber(session.total_hints_embedded),
+    time_spent_seconds: toNullableNumber(session.time_spent_seconds),
+    topic_completion_ratio: toNullableNumber(session.topic_completion_ratio),
   };
 }
 
-export async function dispatchMergePayload(payload: MergePayload): Promise<{ ok: true } | { ok: false; error: string }> {
+function validateMergePayload(payload: MergePayload): string | null {
+  if (
+    payload.correct_answers !== null &&
+    payload.wrong_answers !== null &&
+    payload.questions_attempted !== null &&
+    payload.correct_answers + payload.wrong_answers > payload.questions_attempted
+  ) {
+    return "correct_answers + wrong_answers must be <= questions_attempted";
+  }
+  if (
+    payload.questions_attempted !== null &&
+    payload.total_questions !== null &&
+    payload.questions_attempted > payload.total_questions
+  ) {
+    return "questions_attempted must be <= total_questions";
+  }
+  if (
+    payload.retry_count !== null &&
+    payload.questions_attempted !== null &&
+    payload.retry_count > payload.questions_attempted
+  ) {
+    return "retry_count must be <= questions_attempted";
+  }
+  if (
+    payload.hints_used !== null &&
+    payload.total_hints_embedded !== null &&
+    payload.hints_used > payload.total_hints_embedded
+  ) {
+    return "hints_used must be <= total_hints_embedded";
+  }
+  if (
+    payload.topic_completion_ratio !== null &&
+    (payload.topic_completion_ratio < 0 || payload.topic_completion_ratio > 1)
+  ) {
+    return "topic_completion_ratio must be between 0 and 1";
+  }
+  if (
+    payload.session_status === "completed" &&
+    payload.questions_attempted !== null &&
+    payload.total_questions !== null &&
+    payload.questions_attempted !== payload.total_questions
+  ) {
+    return "completed sessions must have questions_attempted equal total_questions";
+  }
+  return null;
+}
+
+export async function dispatchMergePayload(
+  payload: MergePayload,
+  token: string,
+): Promise<{ ok: true; data: unknown } | { ok: false; error: string }> {
   const endpoint = process.env.MERGE_API_URL;
   if (!endpoint) {
     return { ok: false, error: "MERGE_API_URL is not configured" };
   }
 
+  const validationError = validateMergePayload(payload);
+  if (validationError) {
+    return { ok: false, error: validationError };
+  }
+
   try {
     const response = await fetch(endpoint, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
       body: JSON.stringify(payload),
     });
 
@@ -45,7 +103,8 @@ export async function dispatchMergePayload(payload: MergePayload): Promise<{ ok:
       return { ok: false, error: `Merge API failed with status ${response.status}` };
     }
 
-    return { ok: true };
+    const data = (await response.json()) as unknown;
+    return { ok: true, data };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Merge API request failed";
     return { ok: false, error: message };

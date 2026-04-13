@@ -1,5 +1,6 @@
 export type Difficulty = "easy" | "medium" | "hard";
 export type SessionStatus = "active" | "completed" | "exited";
+export type MergeSessionStatus = "completed" | "exited_midway";
 export type PedagogyResponseCase = "correct_fast" | "correct_slow" | "incorrect";
 export type HintLevel = 0 | 1 | 2 | 3;
 export type RemediationStage = "L1" | "L2" | "escalation";
@@ -32,14 +33,23 @@ export interface SessionMetrics {
   topic_completion_ratio: number;
 }
 
-export interface MergePayload extends SessionMetrics {
+export type MergeNumeric = number | null;
+
+export interface MergePayload {
   student_id: string;
   session_id: string;
   chapter_id: "grade8_rational_numbers";
   timestamp: string;
-  session_status: "completed" | "exited";
-  total_questions: number;
-  total_hints_embedded: number;
+  session_status: MergeSessionStatus;
+  correct_answers: MergeNumeric;
+  wrong_answers: MergeNumeric;
+  questions_attempted: MergeNumeric;
+  total_questions: MergeNumeric;
+  retry_count: MergeNumeric;
+  hints_used: MergeNumeric;
+  total_hints_embedded: MergeNumeric;
+  time_spent_seconds: MergeNumeric;
+  topic_completion_ratio: MergeNumeric;
 }
 
 export interface QuestionDefinition {

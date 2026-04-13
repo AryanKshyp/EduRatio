@@ -3,7 +3,7 @@ import { getQuestionsForSubtopic } from "@/lib/content";
 import { updateLearnerStateAndMastery } from "@/lib/learnerService";
 import { generatePedagogyDecision } from "@/lib/pedagogyService";
 import type { Difficulty } from "@/lib/types";
-import { fail, isNonEmptyString, isNonNegativeNumber, ok, parseJson } from "@/lib/api";
+import { fail, getBearerToken, isNonEmptyString, isNonNegativeNumber, ok, parseJson } from "@/lib/api";
 
 interface SessionUpdateRequest {
   session_id: string;
@@ -23,11 +23,16 @@ interface SessionUpdateRequest {
     repeated_wrong_count?: number;
     average_time_seconds?: number;
     hint_count?: number;
+    is_first_attempt?: boolean;
   };
 }
 
 export async function POST(request: Request) {
   try {
+    if (!getBearerToken(request)) {
+      return fail("Authorization bearer token is required", 401);
+    }
+
     const body = await parseJson<SessionUpdateRequest>(request);
     if (
       !isNonEmptyString(body.session_id) ||
@@ -76,7 +81,7 @@ export async function POST(request: Request) {
     }
 
     const current = session.data;
-    const questionsAttempted = current.questions_attempted + 1;
+    const questionsAttempted = current.questions_attempted + (body.data.is_first_attempt ? 1 : 0);
     const totalQuestions = current.total_questions;
     const topicCompletionRatio = Math.min(1, questionsAttempted / totalQuestions);
 
@@ -86,7 +91,7 @@ export async function POST(request: Request) {
       questions_attempted: questionsAttempted,
       retry_count: current.retry_count + (body.data.attempt > 1 ? 1 : 0),
       hints_used: current.hints_used + (body.data.hint_level > 0 ? 1 : 0),
-      total_hints_embedded: current.total_hints_embedded + 3,
+      total_hints_embedded: current.total_hints_embedded,
       time_spent_seconds: current.time_spent_seconds + body.data.time_taken,
       topic_completion_ratio: topicCompletionRatio,
     };

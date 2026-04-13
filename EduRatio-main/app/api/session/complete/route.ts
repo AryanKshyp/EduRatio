@@ -1,10 +1,18 @@
 import { getSessionBySessionId, updateSessionMetrics } from "@/db/repositories";
-import { fail, isNonEmptyString, ok, parseJson } from "@/lib/api";
+import { fail, getBearerToken, isNonEmptyString, ok, parseJson } from "@/lib/api";
 import { buildMergePayload, dispatchMergePayload } from "@/lib/mergeService";
 
 export async function POST(request: Request) {
   try {
-    const body = await parseJson<{ session_id?: string; status?: "completed" | "exited" }>(request);
+    const body = await parseJson<{
+      session_id?: string;
+      status?: "completed" | "exited_midway";
+      token?: string;
+    }>(request);
+    const token = getBearerToken(request) ?? (isNonEmptyString(body.token) ? body.token.trim() : null);
+    if (!token) {
+      return fail("Authorization bearer token is required", 401);
+    }
     if (!isNonEmptyString(body.session_id) || !body.status) {
       return fail("session_id and status are required", 400);
     }
@@ -17,8 +25,10 @@ export async function POST(request: Request) {
       return fail("Session not found", 404);
     }
 
+    const internalStatus = status === "completed" ? "completed" : "exited";
+
     const update = await updateSessionMetrics(sessionId, {
-      session_status: body.status,
+      session_status: internalStatus,
       completed_at: new Date().toISOString(),
     });
     if (update.error) {
@@ -40,7 +50,7 @@ export async function POST(request: Request) {
     }
 
     const mergePayload = buildMergePayload(session, status);
-    const mergeResult = await dispatchMergePayload(mergePayload);
+    const mergeResult = await dispatchMergePayload(mergePayload, token);
     const nextAttempts = session.merge_dispatch_attempts + 1;
 
     const mergeUpdate = await updateSessionMetrics(sessionId, {
@@ -66,6 +76,7 @@ export async function POST(request: Request) {
         dispatched: true,
         dispatch_attempts: nextAttempts,
       },
+      recommendation: mergeResult.data,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to complete session";

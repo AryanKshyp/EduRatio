@@ -1,0 +1,355 @@
+. How the Student Flow Works (READ THIS CAREFULLY)
+7.1 — The Complete Student Journey
+1. Student visits https://kaushik-dev.online (our Merge portal)
+2. Student registers and logs in → receives a JWT token
+3. Student sees the chapter dashboard with all chapters listed
+4. Student clicks on your chapter
+5. Our portal REDIRECTS the student to YOUR website with auth info in the URL:
+
+   https://your-container.kaushik-dev.online/chapter
+     ?token=<jwt_access_token>
+     &student_id=STD-42
+     &session_id=sess_abc123
+
+6. YOUR app extracts token, student_id, and session_id from the URL
+7. Student completes your chapter (quiz, exercises, etc.)
+8. YOUR app sends a POST request to our Recommendation API with session data
+9. Our API returns a recommendation (what the student should do next)
+10. You display the recommendation to the student
+7.2 — Extracting Session Info from the Redirect URL (REQUIRED)
+DON'T USE YOUR OWN AUTHENTICATION, USE OURS ONE TIME AUTH SETUP
+
+When we redirect a student to your chapter, the URL contains three critical pieces of information. You MUST extract and use all three.
+
+The redirect URL format:
+
+https://your-site.kaushik-dev.online/chapter?token=<jwt>&student_id=STD-42&session_id=sess_abc123
+Parameter	What it is	What you do with it
+token	JWT access token from our auth system	Include in the Authorization: Bearer <token> header when calling our API
+student_id	Unique student identifier (e.g., STD-42)	Include in the recommendation payload — do NOT let students type this manually
+session_id	Unique session identifier we generate	Include in the recommendation payload — do NOT generate your own
+JavaScript — Extract and save:
+
+// This runs on your chapter page when the student arrives
+const params = new URLSearchParams(window.location.search);
+const token = params.get("token");
+const student_id = params.get("student_id");
+const session_id = params.get("session_id");
+
+// Save these — you'll need them throughout the session and when calling our API
+sessionStorage.setItem("token", token);
+sessionStorage.setItem("student_id", student_id);
+sessionStorage.setItem("session_id", session_id);
+Python (Flask) — Extract and save:
+
+from flask import request, session
+
+@app.route('/chapter')
+def chapter():
+    token = request.args.get('token')
+    student_id = request.args.get('student_id')
+    session_id = request.args.get('session_id')
+
+    # Save in Flask session for later use
+    session['token'] = token
+    session['student_id'] = student_id
+    session['session_id'] = session_id
+
+    return render_template('chapter.html')
+7.3 — Decoding the JWT Token (optional but useful)
+You can decode the JWT to get additional user info:
+
+// Install: npm install jwt-decode
+import { jwtDecode } from "jwt-decode";
+
+const user = jwtDecode(token);
+// user.user_id    → 42 (Django user primary key)
+// user.username   → "alice"
+// user.student_id → "STD-42"
+// user.exp        → token expiry timestamp
+Note: jwtDecode only reads the payload — it does not verify the signature. For full verification, use jsonwebtoken with the shared secret.
+
+8. Calling the Recommendation API (REQUIRED)
+After a student completes your chapter (or exits midway), your app MUST send a session payload to our Recommendation API.
+
+8.1 — API Endpoint
+POST https://kaushik-dev.online/api/recommend/
+Content-Type: application/json
+Authorization: Bearer <token_from_redirect_url>
+8.2 — Request Payload
+ALL fields are required. Do not omit any field.
+
+{
+  "student_id":              "STD-42",
+  "session_id":              "sess_abc123",
+  "chapter_id":              "grade6_fractions",
+  "timestamp":               "2026-04-04T10:30:00Z",
+  "session_status":          "completed",
+  "correct_answers":         8,
+  "wrong_answers":           2,
+  "questions_attempted":     10,
+  "total_questions":         15,
+  "retry_count":             3,
+  "hints_used":              2,
+  "total_hints_embedded":    10,
+  "time_spent_seconds":      1200,
+  "topic_completion_ratio":  0.67
+}
+8.3 — Field Definitions
+Field	Type	Description
+student_id	String	From the redirect URL. Never let students type this.
+session_id	String	From the redirect URL. Use this exact value, do NOT generate your own.
+chapter_id	String	Your canonical chapter_id (e.g., grade6_fractions). Must match exactly what was assigned to you.
+timestamp	String	UTC ISO 8601 format. Example: 2026-04-04T10:30:00Z
+session_status	String	Either "completed" or "exited_midway".
+correct_answers	Integer	Number of correctly answered questions.
+wrong_answers	Integer	Number of incorrectly answered questions.
+questions_attempted	Integer	Unique questions the student attempted at least once.
+total_questions	Integer	Total questions in your chapter (including unattempted).
+retry_count	Integer	Number of re-attempts after first submission on a question.
+hints_used	Integer	Number of hints the student actually opened/consumed.
+total_hints_embedded	Integer	Total hints available in your chapter.
+time_spent_seconds	Integer	Active time spent by the student. Exclude long idle periods if possible.
+topic_completion_ratio	Number	Between 0 and 1. Completed learning units divided by total learning units.
+8.4 — Validation Rules
+Enforce these before sending the payload. Our server will reject invalid data.
+
+correct_answers + wrong_answers == questions_attempted
+questions_attempted <= total_questions
+retry_count <= questions_attempted
+hints_used <= total_hints_embedded
+0 <= topic_completion_ratio <= 1
+
+If session_status == "completed" → questions_attempted must equal total_questions
+8.5 — Response You Will Receive
+{
+  "student_id": "STD-42",
+  "chapter_id": "grade6_fractions",
+  "performance_score": 0.72,
+  "confidence_score": 0.85,
+  "learning_state": "strong",
+  "diagnosis": {
+    "accuracy": 0.80,
+    "hint_dependency": "low",
+    "retry_behavior": "moderate",
+    "time_efficiency": "moderate",
+    "history": {
+      "past_attempts": 1,
+      "avg_performance": 0.72,
+      "trend": "new"
+    }
+  },
+  "recommendation": {
+    "type": "next_chapter",
+    "reason": "Strong performance with good accuracy. Ready to advance.",
+    "next_steps": [
+      "Proceed to Grade 6 Number Play",
+      "Review hint-dependent topics if needed"
+    ]
+  }
+}
+When a student's performance is weak, the recommendation.type will be "prerequisite" and the response will include a prerequisite_url field pointing to the chapter they should revisit:
+
+
+{
+  "student_id": "STD-42",
+  "chapter_id": "grade6_fractions",
+  "performance_score": 0.31,
+  "confidence_score": 0.48,
+  "learning_state": "weak",
+  "diagnosis": {
+    "accuracy": 0.30,
+    "hint_dependency": "high",
+    "retry_behavior": "high",
+    "time_efficiency": "low",
+    "history": {
+      "past_attempts": 0,
+      "trend": "new"
+    }
+  },
+  "recommendation": {
+    "type": "prerequisite",
+    "reason": "Low performance indicates foundational gaps.",
+    "next_steps": [
+      "Revisit prerequisite chapter: grade5_fractions",
+      "Complete guided revision before retrying this chapter."
+    ],
+    "prerequisite_url": "https://grade6-fractions.kaushik-dev.online"
+  }
+}
+Note: prerequisite_url is only present when recommendation.type === "prerequisite" and the prerequisite chapter is hosted on our server. Always check for its existence before using it.
+
+Display this recommendation to the student so they know what to do next.
+
+8.6 — Complete Code Examples
+Node.js (Express) — Full integration:
+
+const axios = require('axios');
+
+async function submitSessionToMerge() {
+  // Retrieve saved values from sessionStorage
+  const token = sessionStorage.getItem("token");
+  const student_id = sessionStorage.getItem("student_id");
+  const session_id = sessionStorage.getItem("session_id");
+
+  const payload = {
+    student_id: student_id,
+    session_id: session_id,
+    chapter_id: "grade6_fractions",              // YOUR chapter_id — replace with yours
+    timestamp: new Date().toISOString(),
+    session_status: "completed",                 // or "exited_midway"
+    correct_answers: 8,                          // replace with actual tracked values
+    wrong_answers: 2,
+    questions_attempted: 10,
+    total_questions: 15,
+    retry_count: 3,
+    hints_used: 2,
+    total_hints_embedded: 10,
+    time_spent_seconds: 1200,
+    topic_completion_ratio: 0.67
+  };
+
+  try {
+    const response = await axios.post(
+      'https://kaushik-dev.online/api/recommend/',
+      payload,
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
+      }
+    );
+
+    // Show the recommendation to the student
+    const recommendation = response.data;
+    console.log('Learning state:', recommendation.learning_state);
+    console.log('Recommendation:', recommendation.recommendation.reason);
+    console.log('Next steps:', recommendation.recommendation.next_steps);
+
+    return recommendation;
+
+  } catch (error) {
+    console.error('Failed to submit session:', error.message);
+
+    // Store locally and retry later (see Section 9)
+    localStorage.setItem('pendingPayload', JSON.stringify(payload));
+  }
+}
+Python (Flask) — Full integration:
+
+import requests
+from datetime import datetime, timezone
+from flask import session
+
+def submit_session_to_merge(tracked_data):
+    token = session.get('token')
+    student_id = session.get('student_id')
+    session_id = session.get('session_id')
+
+    payload = {
+        "student_id": student_id,
+        "session_id": session_id,
+        "chapter_id": "grade6_fractions",  # YOUR chapter_id
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "session_status": "completed",
+        "correct_answers": tracked_data["correct"],
+        "wrong_answers": tracked_data["wrong"],
+        "questions_attempted": tracked_data["correct"] + tracked_data["wrong"],
+        "total_questions": tracked_data["total_questions"],
+        "retry_count": tracked_data["retries"],
+        "hints_used": tracked_data["hints_used"],
+        "total_hints_embedded": tracked_data["total_hints"],
+        "time_spent_seconds": tracked_data["time_spent"],
+        "topic_completion_ratio": tracked_data["completed_topics"] / tracked_data["total_topics"]
+    }
+
+    response = requests.post(
+        "https://kaushik-dev.online/api/recommend/",
+        json=payload,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {token}"
+        }
+    )
+
+    return response.json()
+8.7 — When to Send the Payload
+Scenario	What to send
+Student completes all questions	session_status: "completed"
+Student clicks "Exit" or leaves	Show a confirmation popup, then send with session_status: "exited_midway"
+Network failure while sending	Store payload locally, retry with the same session_id
+Send only ONCE per session. Do not send payloads continuously during the session.
+
+9. Handling Edge Cases
+Missing Values
+Do not invent 0 for fields you don't track. Use null instead and inform the Merge Team during integration.
+
+Midway Exit (student closes tab or navigates away)
+Show a confirmation popup. On confirmation, submit with session_status: "exited_midway":
+
+window.addEventListener('beforeunload', (event) => {
+  event.preventDefault();
+  event.returnValue = 'Your progress will be saved. Are you sure you want to leave?';
+});
+For guaranteed delivery even if the tab closes:
+
+window.addEventListener('unload', () => {
+  const payload = JSON.stringify({
+    student_id: sessionStorage.getItem("student_id"),
+    session_id: sessionStorage.getItem("session_id"),
+    chapter_id: "grade6_fractions",
+    timestamp: new Date().toISOString(),
+    session_status: "exited_midway",
+    // ... rest of your tracked metrics
+  });
+
+  // sendBeacon works even when the page is closing
+  navigator.sendBeacon('https://kaushik-dev.online/api/recommend/', payload);
+});
+Network Failure — Retry Logic
+async function submitWithRetry(payload, token, maxRetries = 3) {
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const response = await axios.post(
+        'https://kaushik-dev.online/api/recommend/',
+        payload,
+        { headers: { 'Authorization': `Bearer ${token}` } }
+      );
+      return response.data;  // Success
+    } catch (error) {
+      if (attempt === maxRetries - 1) {
+        // All retries failed — save locally
+        localStorage.setItem('pendingPayload', JSON.stringify(payload));
+        console.error('All retries failed. Payload saved locally.');
+      }
+      // Wait before retrying (1s, 2s, 3s)
+      await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)));
+    }
+  }
+}
+Duplicate Submissions
+Using the same session_id for retries is safe. Our system handles deduplication. Never generate a new session_id when retrying a failed submission — always reuse the one from the redirect URL.
+
+10. Important Rules
+DO
+Listen on your designated app port, bound to 0.0.0.0
+Extract token, student_id, and session_id from the redirect URL
+Use the student_id and session_id from the URL — never generate your own
+Use your exact canonical chapter_id as assigned
+Send ONE payload per session (at completion or confirmed exit)
+Include Authorization: Bearer <token> header when calling our API
+Install and use pm2 to keep your app running after SSH disconnect
+Implement retry logic for failed API calls
+Enforce the validation rules before submitting the payload
+Show the recommendation response to the student
+DO NOT
+Do NOT hardcode student_id or session_id — always use values from the redirect URL
+Do NOT change your app port
+Do NOT send payloads continuously during the session — only at session end
+Do NOT fabricate or use placeholder values in production
+Do NOT generate a new session_id when retrying a failed submission
+Do NOT calculate performance scores — our system does that
+Do NOT share your .pem key publicly (e.g., on GitHub)
+Do NOT try to access other team's containers
+Do NOT run your app on localhost or 127.0.0.1 — must be 0.0.0.0

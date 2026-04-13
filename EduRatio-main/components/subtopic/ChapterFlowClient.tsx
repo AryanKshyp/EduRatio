@@ -16,6 +16,49 @@ import {
   UNLOCK_PREV_MASTERY_MIN,
 } from "@/lib/journeyProgress";
 import { SUBTOPICS } from "@/lib/content";
+import { MERGE_SESSION_STORAGE_KEYS } from "@/lib/mergeSessionKeys";
+
+type MergeRecommendation = {
+  learning_state?: string;
+  recommendation?: {
+    reason?: string;
+    next_steps?: string[];
+    prerequisite_url?: string;
+  };
+};
+
+type PendingCompletion = {
+  session_id: string;
+  status: "completed" | "exited_midway";
+  token: string;
+  queued_at: string;
+};
+
+const PENDING_COMPLETIONS_KEY = "merge_pending_completions";
+const EXIT_CONFIRM_MESSAGE = "Your progress will be saved. Are you sure you want to leave?";
+
+function readPendingCompletions(): PendingCompletion[] {
+  try {
+    const raw = localStorage.getItem(PENDING_COMPLETIONS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as PendingCompletion[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writePendingCompletions(items: PendingCompletion[]) {
+  localStorage.setItem(PENDING_COMPLETIONS_KEY, JSON.stringify(items));
+}
+
+function queuePendingCompletion(item: PendingCompletion) {
+  const existing = readPendingCompletions();
+  if (existing.some((entry) => entry.session_id === item.session_id && entry.status === item.status)) {
+    return;
+  }
+  writePendingCompletions([...existing, item]);
+}
 
 function normalizeInput(s: string) {
   return s.replace(/\s+/g, "").toLowerCase();
@@ -75,7 +118,44 @@ export function ChapterFlowClient({ bundle }: { bundle: ChapterBundle }) {
   const [hintsShown, setHintsShown] = useState(0);
   const [quizSummary, setQuizSummary] = useState<{ correct: number; total: number } | null>(null);
   const [preQuizStarted, setPreQuizStarted] = useState(false);
+  const [mergeRecommendation, setMergeRecommendation] = useState<MergeRecommendation | null>(null);
   const outcomesRef = useRef<boolean[]>([]);
+  const attemptCountsRef = useRef<Record<string, number>>({});
+  const questionStartMsRef = useRef<number>(0);
+  const hasCompletedSessionRef = useRef(false);
+  const hasQueuedExitRef = useRef(false);
+
+  async function submitCompletion(
+    input: Pick<PendingCompletion, "session_id" | "status" | "token">,
+  ): Promise<{ ok: boolean; recommendation?: MergeRecommendation }> {
+    try {
+      const response = await fetch("/api/session/complete", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${input.token}`,
+        },
+        body: JSON.stringify({ session_id: input.session_id, status: input.status }),
+      });
+
+      if (!response.ok) {
+        queuePendingCompletion({
+          ...input,
+          queued_at: new Date().toISOString(),
+        });
+        return { ok: false };
+      }
+
+      const result = (await response.json()) as { data?: { recommendation?: MergeRecommendation } };
+      return { ok: true, recommendation: result?.data?.recommendation };
+    } catch {
+      queuePendingCompletion({
+        ...input,
+        queued_at: new Date().toISOString(),
+      });
+      return { ok: false };
+    }
+  }
 
   useLayoutEffect(() => {
     outcomesRef.current = new Array(bundle.quiz.length).fill(false);
@@ -84,6 +164,99 @@ export function ChapterFlowClient({ bundle }: { bundle: ChapterBundle }) {
   useEffect(() => {
     queueMicrotask(() => setAccessDenied(!isSubtopicUnlocked(bundle.id)));
   }, [bundle.id]);
+
+  useEffect(() => {
+    questionStartMsRef.current = Date.now();
+  }, [qIndex]);
+
+  useEffect(() => {
+    const token = sessionStorage.getItem(MERGE_SESSION_STORAGE_KEYS.token);
+    const studentId = sessionStorage.getItem(MERGE_SESSION_STORAGE_KEYS.studentId);
+    const sessionId = sessionStorage.getItem(MERGE_SESSION_STORAGE_KEYS.sessionId);
+    if (!token || !studentId || !sessionId) return;
+
+    void fetch("/api/session/start", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        student_id: studentId,
+        session_id: sessionId,
+        total_questions: bundle.quiz.length,
+        total_hints_embedded: bundle.quiz.length * 3,
+      }),
+    });
+  }, [bundle.quiz.length]);
+
+  useEffect(() => {
+    let active = true;
+    const flushPending = async () => {
+      const pending = readPendingCompletions();
+      if (!pending.length) return;
+
+      const remaining: PendingCompletion[] = [];
+      for (const entry of pending) {
+        const result = await submitCompletion(entry);
+        if (!result.ok) {
+          remaining.push(entry);
+        }
+      }
+      if (active) {
+        writePendingCompletions(remaining);
+      }
+    };
+
+    void flushPending();
+    const onOnline = () => void flushPending();
+    window.addEventListener("online", onOnline);
+    return () => {
+      active = false;
+      window.removeEventListener("online", onOnline);
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (hasCompletedSessionRef.current) return;
+      const token = sessionStorage.getItem(MERGE_SESSION_STORAGE_KEYS.token);
+      const sessionId = sessionStorage.getItem(MERGE_SESSION_STORAGE_KEYS.sessionId);
+      if (!token || !sessionId) return;
+      hasQueuedExitRef.current = true;
+      queuePendingCompletion({
+        session_id: sessionId,
+        status: "exited_midway",
+        token,
+        queued_at: new Date().toISOString(),
+      });
+      event.preventDefault();
+      event.returnValue = EXIT_CONFIRM_MESSAGE;
+    };
+
+    const handleUnload = () => {
+      if (!hasQueuedExitRef.current || hasCompletedSessionRef.current) return;
+      const token = sessionStorage.getItem(MERGE_SESSION_STORAGE_KEYS.token);
+      const sessionId = sessionStorage.getItem(MERGE_SESSION_STORAGE_KEYS.sessionId);
+      if (!token || !sessionId) return;
+      const payload = JSON.stringify({
+        session_id: sessionId,
+        status: "exited_midway",
+        token,
+      });
+      navigator.sendBeacon(
+        "/api/session/complete",
+        new Blob([payload], { type: "application/json" }),
+      );
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    window.addEventListener("unload", handleUnload);
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      window.removeEventListener("unload", handleUnload);
+    };
+  }, []);
 
   useEffect(() => {
     const sync = () => setAccessDenied(!isSubtopicUnlocked(bundle.id));
@@ -173,8 +346,38 @@ export function ChapterFlowClient({ bundle }: { bundle: ChapterBundle }) {
 
   function onSubmit() {
     if (phase === "remedial" || !question) return;
-    const ok = checkCorrect(question);
-    if (ok) {
+    const isCorrect = checkCorrect(question);
+    const nextAttempt = (attemptCountsRef.current[question.id] ?? 0) + 1;
+    attemptCountsRef.current[question.id] = nextAttempt;
+    const token = sessionStorage.getItem(MERGE_SESSION_STORAGE_KEYS.token);
+    const sessionId = sessionStorage.getItem(MERGE_SESSION_STORAGE_KEYS.sessionId);
+    const elapsedSeconds = Math.max(1, Math.round((Date.now() - questionStartMsRef.current) / 1000));
+    if (token && sessionId) {
+      void fetch("/api/session/update", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          session_id: sessionId,
+          event: "question_attempt",
+          data: {
+            subtopic_id: bundle.id,
+            question_id: question.id,
+            correct: isCorrect,
+            attempt: nextAttempt,
+            hint_level: hintsShown as 0 | 1 | 2 | 3,
+            time_taken: elapsedSeconds,
+            current_difficulty: "medium",
+            remedial_done: phase === "remedial" ? 1 : 0,
+            is_first_attempt: nextAttempt === 1,
+          },
+        }),
+      });
+    }
+
+    if (isCorrect) {
       setPhase("correct");
       return;
     }
@@ -201,6 +404,24 @@ export function ChapterFlowClient({ bundle }: { bundle: ChapterBundle }) {
   }
 
   const finishedAll = qIndex >= bundle.quiz.length;
+
+  useEffect(() => {
+    if (!finishedAll || hasCompletedSessionRef.current) return;
+    const token = sessionStorage.getItem(MERGE_SESSION_STORAGE_KEYS.token);
+    const sessionId = sessionStorage.getItem(MERGE_SESSION_STORAGE_KEYS.sessionId);
+    if (!token || !sessionId) return;
+
+    hasCompletedSessionRef.current = true;
+    void submitCompletion({
+      session_id: sessionId,
+      status: "completed",
+      token,
+    }).then((result) => {
+      if (result.recommendation) {
+        setMergeRecommendation(result.recommendation);
+      }
+    });
+  }, [finishedAll]);
 
   const prevTopicLabel = useMemo(() => {
     const idx = SUBTOPICS.findIndex((t) => t.id === bundle.id);
@@ -408,6 +629,29 @@ export function ChapterFlowClient({ bundle }: { bundle: ChapterBundle }) {
                   </p>
                 ) : null}
                 <p className="mt-2 text-sm text-slate-600">Head back to your journey map whenever you&apos;re ready.</p>
+                {mergeRecommendation?.recommendation?.reason ? (
+                  <div className="mt-4 rounded-2xl border border-[#C8D9E6] bg-[#F5EFEB] p-4 text-left">
+                    <p className="text-xs font-extrabold uppercase tracking-wide text-[#567C8D]">Personalized recommendation</p>
+                    <p className="mt-2 text-sm font-semibold text-[#2F4156]">
+                      {mergeRecommendation.recommendation.reason}
+                    </p>
+                    {mergeRecommendation.recommendation.next_steps?.length ? (
+                      <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-700">
+                        {mergeRecommendation.recommendation.next_steps.map((step) => (
+                          <li key={step}>{step}</li>
+                        ))}
+                      </ul>
+                    ) : null}
+                    {mergeRecommendation.recommendation.prerequisite_url ? (
+                      <a
+                        href={mergeRecommendation.recommendation.prerequisite_url}
+                        className="mt-3 inline-flex text-sm font-bold text-[#567C8D] underline"
+                      >
+                        Open prerequisite chapter
+                      </a>
+                    ) : null}
+                  </div>
+                ) : null}
                 <Link
                   href="/dashboard#map"
                   className="mt-6 inline-flex rounded-2xl bg-[#567C8D] px-8 py-3 text-sm font-extrabold text-white shadow-lg transition hover:bg-[#456d7e]"
