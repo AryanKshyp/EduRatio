@@ -121,6 +121,7 @@ export function ChapterFlowClient({ bundle }: { bundle: ChapterBundle }) {
   const [mergeRecommendation, setMergeRecommendation] = useState<MergeRecommendation | null>(null);
   const outcomesRef = useRef<boolean[]>([]);
   const attemptCountsRef = useRef<Record<string, number>>({});
+  const remedialShownRef = useRef<Record<string, boolean>>({});
   const questionStartMsRef = useRef<number>(0);
   const hasCompletedSessionRef = useRef(false);
   const hasQueuedExitRef = useRef(false);
@@ -370,7 +371,7 @@ export function ChapterFlowClient({ bundle }: { bundle: ChapterBundle }) {
             hint_level: hintsShown as 0 | 1 | 2 | 3,
             time_taken: elapsedSeconds,
             current_difficulty: "medium",
-            remedial_done: phase === "remedial" ? 1 : 0,
+            remedial_done: remedialShownRef.current[question.id] ? 1 : 0,
             is_first_attempt: nextAttempt === 1,
           },
         }),
@@ -382,6 +383,7 @@ export function ChapterFlowClient({ bundle }: { bundle: ChapterBundle }) {
       return;
     }
     if (hintsShown >= 3) {
+      remedialShownRef.current[question.id] = true;
       setPhase("remedial");
       return;
     }
@@ -390,6 +392,7 @@ export function ChapterFlowClient({ bundle }: { bundle: ChapterBundle }) {
 
   function onChooseHint() {
     if (hintsShown >= 3) {
+      if (question) remedialShownRef.current[question.id] = true;
       setPhase("remedial");
       return;
     }
