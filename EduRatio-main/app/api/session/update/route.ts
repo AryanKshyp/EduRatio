@@ -4,6 +4,7 @@ import { updateLearnerStateAndMastery } from "@/lib/learnerService";
 import { generatePedagogyDecision } from "@/lib/pedagogyService";
 import type { Difficulty } from "@/lib/types";
 import { fail, getBearerToken, isNonEmptyString, isNonNegativeNumber, ok, parseJson } from "@/lib/api";
+import { errorMessageFromUnknown, logRouteError, newRequestId } from "@/lib/routeErrorLog";
 
 interface SessionUpdateRequest {
   session_id: string;
@@ -27,7 +28,29 @@ interface SessionUpdateRequest {
   };
 }
 
+function isHintLevel(value: unknown): value is 0 | 1 | 2 | 3 {
+  return value === 0 || value === 1 || value === 2 || value === 3;
+}
+
+function isRemedialDone(value: unknown): value is 0 | 1 | 2 {
+  return value === 0 || value === 1 || value === 2;
+}
+
+function isDifficulty(value: unknown): value is Difficulty {
+  return value === "easy" || value === "medium" || value === "hard";
+}
+
+function safeSessionInt(value: unknown, fallback = 0): number {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.trunc(value);
+  }
+  return fallback;
+}
+
 export async function POST(request: Request) {
+  const requestId = newRequestId();
+  const errHeaders = { "X-Request-Id": requestId };
+
   try {
     if (!getBearerToken(request)) {
       return fail("Authorization bearer token is required", 401);
@@ -41,7 +64,11 @@ export async function POST(request: Request) {
       !isNonEmptyString(body.data.subtopic_id) ||
       !isNonEmptyString(body.data.question_id) ||
       !isNonNegativeNumber(body.data.attempt) ||
-      !isNonNegativeNumber(body.data.time_taken)
+      !isNonNegativeNumber(body.data.time_taken) ||
+      !isHintLevel(body.data.hint_level) ||
+      !isRemedialDone(body.data.remedial_done) ||
+      typeof body.data.correct !== "boolean" ||
+      !isDifficulty(body.data.current_difficulty)
     ) {
       return fail("Invalid update payload", 400);
     }
@@ -77,27 +104,38 @@ export async function POST(request: Request) {
       answer_text: body.data.answer_text ?? null,
     });
     if (attemptInsert.error) {
-      return fail(attemptInsert.error.message, 500);
+      logRouteError("session/update", requestId, attemptInsert.error, {
+        step: "insertQuestionAttempt",
+        session_id: sessionId,
+      });
+      return fail(attemptInsert.error.message, 500, { requestId }, errHeaders);
     }
 
     const current = session.data;
-    const questionsAttempted = current.questions_attempted + (body.data.is_first_attempt ? 1 : 0);
-    const totalQuestions = current.total_questions;
-    const topicCompletionRatio = Math.min(1, questionsAttempted / totalQuestions);
+    const questionsAttempted =
+      safeSessionInt(current.questions_attempted) + (body.data.is_first_attempt ? 1 : 0);
+    const totalQuestions = safeSessionInt(current.total_questions);
+    const topicCompletionRatio =
+      totalQuestions > 0 ? Math.min(1, questionsAttempted / totalQuestions) : 0;
 
     const patch = {
-      correct_answers: current.correct_answers + (body.data.correct ? 1 : 0),
-      wrong_answers: current.wrong_answers + (body.data.correct ? 0 : 1),
+      correct_answers: safeSessionInt(current.correct_answers) + (body.data.correct ? 1 : 0),
+      wrong_answers: safeSessionInt(current.wrong_answers) + (body.data.correct ? 0 : 1),
       questions_attempted: questionsAttempted,
-      retry_count: current.retry_count + (body.data.attempt > 1 ? 1 : 0),
-      hints_used: current.hints_used + (body.data.hint_level > 0 ? 1 : 0),
-      total_hints_embedded: current.total_hints_embedded,
-      time_spent_seconds: current.time_spent_seconds + body.data.time_taken,
+      retry_count: safeSessionInt(current.retry_count) + (body.data.attempt > 1 ? 1 : 0),
+      hints_used: safeSessionInt(current.hints_used) + (body.data.hint_level > 0 ? 1 : 0),
+      total_hints_embedded: safeSessionInt(current.total_hints_embedded),
+      time_spent_seconds: safeSessionInt(current.time_spent_seconds) + body.data.time_taken,
       topic_completion_ratio: topicCompletionRatio,
     };
     const metricsUpdate = await updateSessionMetrics(sessionId, patch);
     if (metricsUpdate.error) {
-      return fail(metricsUpdate.error.message, 500);
+      logRouteError("session/update", requestId, metricsUpdate.error, {
+        step: "updateSessionMetrics",
+        session_id: sessionId,
+        patch,
+      });
+      return fail(metricsUpdate.error.message, 500, { requestId }, errHeaders);
     }
 
     const pedagogyDecision = generatePedagogyDecision({
@@ -126,7 +164,8 @@ export async function POST(request: Request) {
       next_question_id: candidate?.id ?? null,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Session update failed";
-    return fail(message, 500);
+    logRouteError("session/update", requestId, error, { step: "unhandled" });
+    const message = errorMessageFromUnknown(error, "Session update failed");
+    return fail(message, 500, { requestId }, errHeaders);
   }
 }

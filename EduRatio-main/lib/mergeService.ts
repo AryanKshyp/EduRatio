@@ -1,6 +1,9 @@
 import type { SessionsRow } from "@/db/schema.types";
 import type { MergePayload, MergeSessionStatus } from "@/lib/types";
 
+/** Official recommendation endpoint (override with MERGE_API_URL in env). */
+export const DEFAULT_MERGE_API_URL = "https://kaushik-dev.online/api/recommend/";
+
 function toNullableNumber(value: unknown): number | null {
   const converted = Number(value);
   return Number.isFinite(converted) ? converted : null;
@@ -79,34 +82,44 @@ export async function dispatchMergePayload(
   payload: MergePayload,
   token: string,
 ): Promise<{ ok: true; data: unknown } | { ok: false; error: string }> {
-  const endpoint = process.env.MERGE_API_URL;
-  if (!endpoint) {
-    return { ok: false, error: "MERGE_API_URL is not configured" };
-  }
+  const endpoint = process.env.MERGE_API_URL?.trim() || DEFAULT_MERGE_API_URL;
 
   const validationError = validateMergePayload(payload);
   if (validationError) {
     return { ok: false, error: validationError };
   }
 
-  try {
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify(payload),
-    });
+  const maxAttempts = 3;
+  let lastError = "Merge API request failed";
 
-    if (!response.ok) {
-      return { ok: false, error: `Merge API failed with status ${response.status}` };
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (response.ok) {
+        const data = (await response.json()) as unknown;
+        return { ok: true, data };
+      }
+
+      lastError = `Merge API failed with status ${response.status}`;
+      if (response.status >= 400 && response.status < 500 && response.status !== 408 && response.status !== 429) {
+        return { ok: false, error: lastError };
+      }
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : "Merge API request failed";
     }
 
-    const data = (await response.json()) as unknown;
-    return { ok: true, data };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Merge API request failed";
-    return { ok: false, error: message };
+    if (attempt < maxAttempts - 1) {
+      await new Promise((r) => setTimeout(r, 300 * 2 ** attempt));
+    }
   }
+
+  return { ok: false, error: lastError };
 }

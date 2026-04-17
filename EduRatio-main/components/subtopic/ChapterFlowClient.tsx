@@ -27,6 +27,22 @@ type MergeRecommendation = {
   };
 };
 
+function normalizeRecommendation(raw: unknown): MergeRecommendation | undefined {
+  if (raw == null || typeof raw !== "object") return undefined;
+  const o = raw as Record<string, unknown>;
+  if ("recommendation" in o || "learning_state" in o) return o as MergeRecommendation;
+  if ("reason" in o || "next_steps" in o) {
+    return {
+      recommendation: {
+        reason: typeof o.reason === "string" ? o.reason : undefined,
+        next_steps: Array.isArray(o.next_steps) ? (o.next_steps as string[]) : undefined,
+        prerequisite_url: typeof o.prerequisite_url === "string" ? o.prerequisite_url : undefined,
+      },
+    };
+  }
+  return undefined;
+}
+
 type PendingCompletion = {
   session_id: string;
   status: "completed" | "exited_midway";
@@ -35,7 +51,11 @@ type PendingCompletion = {
 };
 
 const PENDING_COMPLETIONS_KEY = "merge_pending_completions";
-const EXIT_CONFIRM_MESSAGE = "Your progress will be saved. Are you sure you want to leave?";
+const EXIT_CONFIRM_MESSAGE =
+  "Your progress will be sent to your instructor. Are you sure you want to leave this chapter?";
+const EXIT_MODAL_TITLE = "Leave chapter?";
+const EXIT_MODAL_BODY =
+  "We will save your progress and submit this session (exited midway) using your URL session id. Continue?";
 
 function readPendingCompletions(): PendingCompletion[] {
   try {
@@ -119,43 +139,67 @@ export function ChapterFlowClient({ bundle }: { bundle: ChapterBundle }) {
   const [quizSummary, setQuizSummary] = useState<{ correct: number; total: number } | null>(null);
   const [preQuizStarted, setPreQuizStarted] = useState(false);
   const [mergeRecommendation, setMergeRecommendation] = useState<MergeRecommendation | null>(null);
+  const [mergeSessionReady, setMergeSessionReady] = useState(false);
+  const [exitModalOpen, setExitModalOpen] = useState(false);
+  const [exitSubmitting, setExitSubmitting] = useState(false);
+  const [exitRecommendation, setExitRecommendation] = useState<MergeRecommendation | null>(null);
   const outcomesRef = useRef<boolean[]>([]);
   const attemptCountsRef = useRef<Record<string, number>>({});
   const remedialShownRef = useRef<Record<string, boolean>>({});
   const questionStartMsRef = useRef<number>(0);
-  const hasCompletedSessionRef = useRef(false);
-  const hasQueuedExitRef = useRef(false);
+  /** Successful POST /api/session/complete (merge + recommend dispatched). */
+  const mergeTerminalSucceededRef = useRef(false);
+  /** Last intended terminal status if the tab closes before the fetch finishes. */
+  const pendingTerminalStatusRef = useRef<"completed" | "exited_midway" | null>(null);
+  const quizCompletionAttemptedRef = useRef(false);
+  const activeMergeSessionIdRef = useRef<string | null>(null);
 
   async function submitCompletion(
     input: Pick<PendingCompletion, "session_id" | "status" | "token">,
   ): Promise<{ ok: boolean; recommendation?: MergeRecommendation }> {
-    try {
-      const response = await fetch("/api/session/complete", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${input.token}`,
-        },
-        body: JSON.stringify({ session_id: input.session_id, status: input.status }),
-      });
-
-      if (!response.ok) {
-        queuePendingCompletion({
-          ...input,
-          queued_at: new Date().toISOString(),
+    const maxAttempts = 4;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        const response = await fetch("/api/session/complete", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${input.token}`,
+          },
+          body: JSON.stringify({ session_id: input.session_id, status: input.status }),
         });
-        return { ok: false };
-      }
 
-      const result = (await response.json()) as { data?: { recommendation?: MergeRecommendation } };
-      return { ok: true, recommendation: result?.data?.recommendation };
-    } catch {
-      queuePendingCompletion({
-        ...input,
-        queued_at: new Date().toISOString(),
-      });
-      return { ok: false };
+        if (response.ok) {
+          const result = (await response.json()) as { data?: { recommendation?: unknown } };
+          const raw = result?.data?.recommendation ?? result?.data;
+          const recommendation =
+            normalizeRecommendation(raw) ?? (raw as MergeRecommendation | undefined);
+          mergeTerminalSucceededRef.current = true;
+          return { ok: true, recommendation };
+        }
+
+        if (
+          response.status >= 400 &&
+          response.status < 500 &&
+          response.status !== 408 &&
+          response.status !== 429
+        ) {
+          queuePendingCompletion({
+            ...input,
+            queued_at: new Date().toISOString(),
+          });
+          return { ok: false };
+        }
+      } catch {
+        /* network — retry */
+      }
+      await new Promise((r) => setTimeout(r, Math.min(4000, 200 * 2 ** attempt)));
     }
+    queuePendingCompletion({
+      ...input,
+      queued_at: new Date().toISOString(),
+    });
+    return { ok: false };
   }
 
   useLayoutEffect(() => {
@@ -219,43 +263,60 @@ export function ChapterFlowClient({ bundle }: { bundle: ChapterBundle }) {
   }, []);
 
   useEffect(() => {
-    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (hasCompletedSessionRef.current) return;
+    const syncMergeCredentials = () => {
+      try {
+        const t = sessionStorage.getItem(MERGE_SESSION_STORAGE_KEYS.token);
+        const s = sessionStorage.getItem(MERGE_SESSION_STORAGE_KEYS.sessionId);
+        setMergeSessionReady(!!(t && s));
+        if (s && s !== activeMergeSessionIdRef.current) {
+          activeMergeSessionIdRef.current = s;
+          mergeTerminalSucceededRef.current = false;
+          quizCompletionAttemptedRef.current = false;
+          pendingTerminalStatusRef.current = null;
+        }
+      } catch {
+        setMergeSessionReady(false);
+      }
+    };
+    syncMergeCredentials();
+    const t = window.setTimeout(syncMergeCredentials, 0);
+    window.addEventListener("focus", syncMergeCredentials);
+    return () => {
+      window.clearTimeout(t);
+      window.removeEventListener("focus", syncMergeCredentials);
+    };
+  }, []);
+
+  useEffect(() => {
+    const sendTerminalBeacon = () => {
+      if (mergeTerminalSucceededRef.current) return;
       const token = sessionStorage.getItem(MERGE_SESSION_STORAGE_KEYS.token);
       const sessionId = sessionStorage.getItem(MERGE_SESSION_STORAGE_KEYS.sessionId);
       if (!token || !sessionId) return;
-      hasQueuedExitRef.current = true;
-      queuePendingCompletion({
-        session_id: sessionId,
-        status: "exited_midway",
-        token,
-        queued_at: new Date().toISOString(),
-      });
+      const status = pendingTerminalStatusRef.current ?? "exited_midway";
+      const payload = JSON.stringify({ session_id: sessionId, status, token });
+      navigator.sendBeacon("/api/session/complete", new Blob([payload], { type: "application/json" }));
+    };
+
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (mergeTerminalSucceededRef.current) return;
+      const token = sessionStorage.getItem(MERGE_SESSION_STORAGE_KEYS.token);
+      const sessionId = sessionStorage.getItem(MERGE_SESSION_STORAGE_KEYS.sessionId);
+      if (!token || !sessionId) return;
       event.preventDefault();
       event.returnValue = EXIT_CONFIRM_MESSAGE;
     };
 
-    const handleUnload = () => {
-      if (!hasQueuedExitRef.current || hasCompletedSessionRef.current) return;
-      const token = sessionStorage.getItem(MERGE_SESSION_STORAGE_KEYS.token);
-      const sessionId = sessionStorage.getItem(MERGE_SESSION_STORAGE_KEYS.sessionId);
-      if (!token || !sessionId) return;
-      const payload = JSON.stringify({
-        session_id: sessionId,
-        status: "exited_midway",
-        token,
-      });
-      navigator.sendBeacon(
-        "/api/session/complete",
-        new Blob([payload], { type: "application/json" }),
-      );
+    const onPageHide = (event: PageTransitionEvent) => {
+      if (event.persisted) return;
+      sendTerminalBeacon();
     };
 
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    window.addEventListener("unload", handleUnload);
+    window.addEventListener("beforeunload", onBeforeUnload);
+    window.addEventListener("pagehide", onPageHide);
     return () => {
-      window.removeEventListener("beforeunload", handleBeforeUnload);
-      window.removeEventListener("unload", handleUnload);
+      window.removeEventListener("beforeunload", onBeforeUnload);
+      window.removeEventListener("pagehide", onPageHide);
     };
   }, []);
 
@@ -409,12 +470,13 @@ export function ChapterFlowClient({ bundle }: { bundle: ChapterBundle }) {
   const finishedAll = qIndex >= bundle.quiz.length;
 
   useEffect(() => {
-    if (!finishedAll || hasCompletedSessionRef.current) return;
+    if (!finishedAll || quizCompletionAttemptedRef.current) return;
     const token = sessionStorage.getItem(MERGE_SESSION_STORAGE_KEYS.token);
     const sessionId = sessionStorage.getItem(MERGE_SESSION_STORAGE_KEYS.sessionId);
     if (!token || !sessionId) return;
 
-    hasCompletedSessionRef.current = true;
+    quizCompletionAttemptedRef.current = true;
+    pendingTerminalStatusRef.current = "completed";
     void submitCompletion({
       session_id: sessionId,
       status: "completed",
@@ -431,6 +493,48 @@ export function ChapterFlowClient({ bundle }: { bundle: ChapterBundle }) {
     if (idx <= 0) return null;
     return SUBTOPICS[idx - 1]!.title;
   }, [bundle.id]);
+
+  function openExitModal() {
+    setExitRecommendation(null);
+    setExitModalOpen(true);
+  }
+
+  function closeExitModal() {
+    if (exitSubmitting) return;
+    setExitModalOpen(false);
+    setExitRecommendation(null);
+  }
+
+  async function confirmExitMidway() {
+    const token = sessionStorage.getItem(MERGE_SESSION_STORAGE_KEYS.token);
+    const sessionId = sessionStorage.getItem(MERGE_SESSION_STORAGE_KEYS.sessionId);
+    if (!token || !sessionId) {
+      setExitModalOpen(false);
+      router.push("/dashboard#map");
+      return;
+    }
+    pendingTerminalStatusRef.current = "exited_midway";
+    setExitSubmitting(true);
+    const result = await submitCompletion({
+      session_id: sessionId,
+      status: "exited_midway",
+      token,
+    });
+    setExitSubmitting(false);
+    if (!result.ok) return;
+    if (result.recommendation) {
+      setExitRecommendation(result.recommendation);
+      return;
+    }
+    setExitModalOpen(false);
+    router.push("/dashboard#map");
+  }
+
+  function finishExitToDashboard() {
+    setExitModalOpen(false);
+    setExitRecommendation(null);
+    router.push("/dashboard#map");
+  }
 
   if (accessDenied === null) {
     return (
@@ -470,7 +574,88 @@ export function ChapterFlowClient({ bundle }: { bundle: ChapterBundle }) {
 
   return (
     <div className="ml-[calc(50%-50vw)] w-screen max-w-[100vw] overflow-x-hidden">
-      <PenChapterBanner hero={bundle.hero} />
+      {exitModalOpen ? (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-[#2F4156]/50 p-4 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="exit-modal-title"
+        >
+          <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-3xl border-2 border-[#C8D9E6] bg-white p-6 shadow-2xl">
+            {exitRecommendation ? (
+              <>
+                <h2 id="exit-modal-title" className="font-[family-name:var(--font-baloo)] text-xl font-extrabold text-[#2F4156]">
+                  Session saved
+                </h2>
+                <p className="mt-2 text-sm font-semibold text-[#567C8D]">Here is your personalized recommendation.</p>
+                {exitRecommendation.learning_state ? (
+                  <p className="mt-3 text-sm font-bold text-[#2F4156]">Learning state: {exitRecommendation.learning_state}</p>
+                ) : null}
+                {exitRecommendation.recommendation?.reason ? (
+                  <div className="mt-4 rounded-2xl border border-[#C8D9E6] bg-[#F5EFEB] p-4 text-left">
+                    <p className="text-xs font-extrabold uppercase tracking-wide text-[#567C8D]">Recommendation</p>
+                    <p className="mt-2 text-sm font-semibold text-[#2F4156]">{exitRecommendation.recommendation.reason}</p>
+                    {exitRecommendation.recommendation.next_steps?.length ? (
+                      <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-700">
+                        {exitRecommendation.recommendation.next_steps.map((step) => (
+                          <li key={step}>{step}</li>
+                        ))}
+                      </ul>
+                    ) : null}
+                    {exitRecommendation.recommendation.prerequisite_url ? (
+                      <a
+                        href={exitRecommendation.recommendation.prerequisite_url}
+                        className="mt-3 inline-flex text-sm font-bold text-[#567C8D] underline"
+                      >
+                        Open prerequisite chapter
+                      </a>
+                    ) : null}
+                  </div>
+                ) : !exitRecommendation.learning_state ? (
+                  <p className="mt-4 text-sm text-slate-600">Your session was submitted successfully.</p>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={finishExitToDashboard}
+                  className="mt-6 w-full rounded-2xl bg-[#567C8D] px-6 py-3 text-sm font-extrabold text-white shadow-lg transition hover:bg-[#456d7e]"
+                >
+                  Back to learning journey
+                </button>
+              </>
+            ) : (
+              <>
+                <h2 id="exit-modal-title" className="font-[family-name:var(--font-baloo)] text-xl font-extrabold text-[#2F4156]">
+                  {EXIT_MODAL_TITLE}
+                </h2>
+                <p className="mt-3 text-sm font-semibold leading-relaxed text-slate-700">{EXIT_MODAL_BODY}</p>
+                <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-end">
+                  <button
+                    type="button"
+                    onClick={closeExitModal}
+                    disabled={exitSubmitting}
+                    className="rounded-2xl border-2 border-[#C8D9E6] bg-white px-5 py-2.5 text-sm font-extrabold text-[#2F4156] hover:bg-[#F5EFEB] disabled:opacity-50"
+                  >
+                    Stay
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void confirmExitMidway()}
+                    disabled={exitSubmitting}
+                    className="rounded-2xl bg-[#567C8D] px-5 py-2.5 text-sm font-extrabold text-white shadow-md hover:bg-[#456d7e] disabled:opacity-50"
+                  >
+                    {exitSubmitting ? "Submitting…" : "Leave and submit"}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      ) : null}
+
+      <PenChapterBanner
+        hero={bundle.hero}
+        onBackRequest={mergeSessionReady && !finishedAll ? openExitModal : undefined}
+      />
 
       <div className="relative bg-[#F5EFEB]/80">
         <div className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-gradient-to-b from-[#C8D9E6]/40 to-transparent" />

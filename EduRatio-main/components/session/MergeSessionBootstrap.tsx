@@ -17,6 +17,18 @@ export function MergeSessionBootstrap() {
     sessionStorage.setItem(MERGE_SESSION_STORAGE_KEYS.token, token);
     sessionStorage.setItem(MERGE_SESSION_STORAGE_KEYS.studentId, studentId);
     sessionStorage.setItem(MERGE_SESSION_STORAGE_KEYS.sessionId, sessionId);
+
+    const url = new URL(window.location.href);
+    let stripped = false;
+    for (const key of ["token", "student_id", "session_id"] as const) {
+      if (url.searchParams.has(key)) {
+        url.searchParams.delete(key);
+        stripped = true;
+      }
+    }
+    if (stripped) {
+      window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+    }
   }, []);
 
   return null;
